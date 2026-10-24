@@ -1,34 +1,31 @@
--- jobid joiner on github
-
 --[[
-	JOB JOINER PRO - mobile first (Delta / Android)
-	- 1 requisicao por ID (debounce + cache), nao 1 por tecla
-	- paginacao da lista de servidores (300 servidores) em vez de 100
-	- clipboard real, validacao de UUID, feedback por linha de status
+	GLASS TERMINAL - executor mobile (Delta / Android)
+	Console Luau com liquid glass, arrastavel, redimensionavel.
+	Execute, limpe, pule linha, copie. print/warn vao para o log.
 ]]
 
-local Players  = game:GetService("Players")
-local Tween    = game:GetService("TweenService")
-local Http     = game:GetService("HttpService")
-local Teleport = game:GetService("TeleportService")
-local UIS      = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+local Tween   = game:GetService("TweenService")
+local UIS     = game:GetService("UserInputService")
 
 local lp      = Players.LocalPlayer
 local isTouch = UIS.TouchEnabled and not UIS.KeyboardEnabled
 
 local C = {
-	bg      = Color3.fromRGB(11, 12, 15),
-	head    = Color3.fromRGB(16, 18, 22),
-	field   = Color3.fromRGB(20, 22, 28),
-	surf    = Color3.fromRGB(26, 29, 36),
-	line    = Color3.fromRGB(37, 41, 50),
-	text    = Color3.fromRGB(232, 235, 242),
-	dim     = Color3.fromRGB(124, 132, 148),
-	accent  = Color3.fromRGB(86, 156, 255),
-	accent2 = Color3.fromRGB(0, 201, 255),
-	ok      = Color3.fromRGB(63, 205, 145),
-	bad     = Color3.fromRGB(240, 100, 100),
+	glass   = Color3.fromRGB(18, 20, 26),
+	well    = Color3.fromRGB(8, 9, 13),
+	text    = Color3.fromRGB(236, 240, 247),
+	dim     = Color3.fromRGB(138, 146, 162),
+	faint   = Color3.fromRGB(92, 100, 116),
+	line    = Color3.fromRGB(54, 60, 74),
+	mint    = Color3.fromRGB(64, 224, 150),
+	blue    = Color3.fromRGB(96, 165, 250),
+	red     = Color3.fromRGB(255, 95, 86),
+	yellow  = Color3.fromRGB(254, 188, 46),
+	green   = Color3.fromRGB(40, 200, 64),
 }
+
+local TITLE_H = 40
 
 local function mk(class, props, parent)
 	local o = Instance.new(class)
@@ -38,22 +35,50 @@ local function mk(class, props, parent)
 end
 
 local function tween(o, props, t, style, dir)
-	Tween:Create(o, TweenInfo.new(t or 0.12, style or Enum.EasingStyle.Quad, dir or Enum.EasingDirection.Out), props):Play()
+	local tw = Tween:Create(o, TweenInfo.new(t or 0.14, style or Enum.EasingStyle.Quad, dir or Enum.EasingDirection.Out), props)
+	tw:Play()
+	return tw
 end
 
 local function corner(o, r)
 	local c = Instance.new("UICorner")
-	c.CornerRadius = UDim.new(0, r or 10)
+	c.CornerRadius = UDim.new(0, r or 12)
 	c.Parent = o
 	return c
 end
 
-local function tapFx(b, to)
+local function stroke(o, color, alpha, grad)
+	local s = Instance.new("UIStroke")
+	s.Color, s.Transparency, s.Thickness = color, alpha or 0.2, 1
+	s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	s.Parent = o
+	if grad then
+		local g = Instance.new("UIGradient")
+		g.Rotation = 90
+		g.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255), Color3.fromRGB(120, 130, 150))
+		g.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.25),
+			NumberSequenceKeypoint.new(0.55, 0.8),
+			NumberSequenceKeypoint.new(1, 0.95),
+		})
+		g.Parent = s
+	end
+	return s
+end
+
+local conns = {}
+local function on(sig, fn)
+	local c = sig:Connect(fn)
+	conns[#conns + 1] = c
+	return c
+end
+
+local function tapFx(b, depth)
 	local sc = Instance.new("UIScale")
 	sc.Parent = b
 	b.InputBegan:Connect(function(i)
 		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-			tween(sc, { Scale = to or 0.94 }, 0.07)
+			tween(sc, { Scale = depth or 0.95 }, 0.07)
 		end
 	end)
 	b.InputEnded:Connect(function(i)
@@ -63,23 +88,7 @@ local function tapFx(b, to)
 	end)
 end
 
-local conns = {}
-
-local function on(sig, fn)
-	local c = sig:Connect(fn)
-	conns[#conns + 1] = c
-	return c
-end
-
-local function stroke(o, color, alpha)
-	local s = Instance.new("UIStroke")
-	s.Color, s.Transparency, s.Thickness = color, alpha or 0, 1
-	s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	s.Parent = o
-	return s
-end
-
-local function getHost()
+local function hud()
 	local ok, h = pcall(function() return gethui and gethui() end)
 	if ok and h then return h end
 	ok, h = pcall(function() return game:GetService("CoreGui") end)
@@ -87,22 +96,20 @@ local function getHost()
 	return lp:WaitForChild("PlayerGui")
 end
 
-local host = getHost()
-for _, obj in ipairs(host:GetChildren()) do
-	if obj.Name == "JobJoinerPro" and obj:IsA("ScreenGui") then obj:Destroy() end
+local host = hud()
+for _, o in ipairs(host:GetChildren()) do
+	if o.Name == "GlassTerminal" and o:IsA("ScreenGui") then o:Destroy() end
 end
 
--- layout ---------------------------------------------------------------
+-- geometria -----------------------------------------------------------------
 local cam = workspace.CurrentCamera
-local vx  = cam and cam.ViewportSize.X or 400
-local W   = math.clamp(vx - 40, 272, 340)
-local H   = 268
-local BODY_H = 224
-local bx  = 12
-local bw  = W - 24
+local vp  = cam and cam.ViewportSize or Vector2.new(800, 600)
+
+local W = math.min(420, math.max(280, vp.X - 32))
+local H = math.min(560, math.max(300, vp.Y - 90))
 
 local sg = mk("ScreenGui", {
-	Name = "JobJoinerPro",
+	Name = "GlassTerminal",
 	ResetOnSpawn = false,
 	IgnoreGuiInset = true,
 	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
@@ -113,488 +120,429 @@ if not pcall(function() sg.Parent = host end) then
 end
 
 local mf = mk("Frame", {
-	Name = "Root",
-	AnchorPoint = Vector2.new(0.5, 0.5),
-	Position = UDim2.fromScale(0.5, 0.45),
+	AnchorPoint = Vector2.new(0, 0),
+	Position = UDim2.fromOffset((vp.X - W) / 2, (vp.Y - H) / 2 - 12),
 	Size = UDim2.fromOffset(W, H),
-	BackgroundColor3 = C.bg,
+	BackgroundColor3 = C.glass,
+	BackgroundTransparency = 0.22,
 	BorderSizePixel = 0,
-	ClipsDescendants = true,
+	ClipsDescendants = false,
 	Active = true,
 }, sg)
-corner(mf, 12)
-stroke(mf, C.line, 0.15)
+corner(mf, 18)
+stroke(mf, C.line, 0.35, true)
 
-local head = mk("Frame", {
-	Size = UDim2.new(1, 0, 0, 44),
-	BackgroundColor3 = C.head,
+pcall(function()
+	local sh = Instance.new("UIShadow")
+	sh.BlurRadius = UDim.new(0, 26)
+	sh.Offset = UDim2.new(0, 0, 0, 10)
+	sh.Color = Color3.new(0, 0, 0)
+	sh.Transparency = 0.45
+	sh.Spread = UDim.new(0, -2)
+	sh.Parent = mf
+end)
+
+-- vidro: brilho superior + respiro azul embaixo
+local sheen = mk("Frame", {
+	Size = UDim2.new(1, 0, 1, 0),
+	BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+	BackgroundTransparency = 0,
 	BorderSizePixel = 0,
+	ZIndex = 1,
+}, mf)
+corner(sheen, 18)
+local sheenGrad = Instance.new("UIGradient")
+sheenGrad.Rotation = 90
+sheenGrad.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255), Color3.fromRGB(255, 255, 255))
+sheenGrad.Transparency = NumberSequence.new({
+	NumberSequenceKeypoint.new(0, 0.72),
+	NumberSequenceKeypoint.new(0.16, 0.9),
+	NumberSequenceKeypoint.new(0.65, 0.97),
+	NumberSequenceKeypoint.new(1, 1),
+})
+sheenGrad.Parent = sheen
+
+local glow = mk("Frame", {
+	Size = UDim2.new(1, 0, 0.45, 0),
+	Position = UDim2.new(0, 0, 0.55, 0),
+	BackgroundColor3 = C.blue,
+	BackgroundTransparency = 0,
+	BorderSizePixel = 0,
+	ZIndex = 1,
+}, mf)
+corner(glow, 18)
+local glowGrad = Instance.new("UIGradient")
+glowGrad.Rotation = 90
+glowGrad.Transparency = NumberSequence.new({
+	NumberSequenceKeypoint.new(0, 1),
+	NumberSequenceKeypoint.new(1, 0.9),
+})
+glowGrad.Parent = glow
+
+-- titulo --------------------------------------------------------------------
+local bar = mk("Frame", {
+	Size = UDim2.new(1, 0, 0, TITLE_H),
+	BackgroundTransparency = 1,
+	ZIndex = 2,
 }, mf)
 
-mk("Frame", {
-	Size = UDim2.new(1, 0, 0, 1),
-	Position = UDim2.new(0, 0, 1, -1),
-	BackgroundColor3 = C.line,
-	BorderSizePixel = 0,
-}, head)
+local function light(x, color)
+	local b = mk("TextButton", {
+		Size = UDim2.fromOffset(12, 12),
+		Position = UDim2.fromOffset(x, 14),
+		BackgroundColor3 = color,
+		BackgroundTransparency = 0.05,
+		BorderSizePixel = 0,
+		Text = "",
+		AutoButtonColor = false,
+		ZIndex = 3,
+	}, bar)
+	corner(b, 999)
+	tapFx(b, 0.8)
+	if not isTouch then
+		b.MouseEnter:Connect(function()
+			tween(b, { BackgroundTransparency = 0 }, 0.1)
+			tween(b, { Size = UDim2.fromOffset(13, 13) }, 0.1)
+		end)
+		b.MouseLeave:Connect(function()
+			tween(b, { BackgroundTransparency = 0.05 }, 0.1)
+			tween(b, { Size = UDim2.fromOffset(12, 12) }, 0.1)
+		end)
+	end
+	return b
+end
 
-local logo = mk("Frame", {
-	Size = UDim2.fromOffset(6, 6),
-	Position = UDim2.new(0, 14, 0.5, -3),
-	BackgroundColor3 = C.accent,
-	BorderSizePixel = 0,
-}, head)
-corner(logo, 999)
+local closeL = light(14, C.red)
+local minL   = light(32, C.yellow)
+local maxL   = light(50, C.green)
 
 mk("TextLabel", {
-	Size = UDim2.new(1, -110, 1, 0),
-	Position = UDim2.fromOffset(26, 0),
+	Size = UDim2.new(1, -160, 1, 0),
+	Position = UDim2.fromOffset(70, 0),
 	BackgroundTransparency = 1,
-	Text = "Job Joiner",
-	TextColor3 = C.text,
-	TextSize = 13,
-	Font = Enum.Font.GothamBold,
-	TextXAlignment = Enum.TextXAlignment.Left,
-}, head)
-
-local minBtn = mk("TextButton", {
-	Size = UDim2.fromOffset(26, 26),
-	Position = UDim2.new(1, -66, 0.5, -13),
-	BackgroundColor3 = C.surf,
-	AutoButtonColor = false,
-	Text = "-",
-	TextColor3 = C.dim,
-	TextSize = 14,
-	TextYAlignment = Enum.TextYAlignment.Center,
-	Font = Enum.Font.GothamBold,
-}, head)
-corner(minBtn, 7)
-tapFx(minBtn)
-
-local closeBtn = mk("TextButton", {
-	Size = UDim2.fromOffset(26, 26),
-	Position = UDim2.new(1, -36, 0.5, -13),
-	BackgroundColor3 = C.surf,
-	AutoButtonColor = false,
-	Text = "X",
+	Text = "luau — terminal",
+	RichText = true,
 	TextColor3 = C.dim,
 	TextSize = 11,
-	Font = Enum.Font.GothamBold,
-}, head)
-corner(closeBtn, 7)
-tapFx(closeBtn)
+	Font = Enum.Font.GothamMedium,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextTruncate = Enum.TextTruncate.AtEnd,
+	ZIndex = 3,
+}, bar)
 
-local body = mk("Frame", {
-	Size = UDim2.new(1, 0, 0, BODY_H),
-	Position = UDim2.fromOffset(0, 44),
+local dot = mk("Frame", {
+	Size = UDim2.fromOffset(5, 5),
+	AnchorPoint = Vector2.new(1, 0.5),
+	Position = UDim2.new(1, -64, 0.5, 0),
+	BackgroundColor3 = C.mint,
+	BackgroundTransparency = 0.15,
+	BorderSizePixel = 0,
+	ZIndex = 3,
+}, bar)
+corner(dot, 999)
+
+mk("TextLabel", {
+	Size = UDim2.fromOffset(50, 20),
+	AnchorPoint = Vector2.new(1, 0.5),
+	Position = UDim2.new(1, -14, 0.5, 0),
 	BackgroundTransparency = 1,
+	Text = "pronto",
+	TextColor3 = C.faint,
+	TextSize = 10,
+	Font = Enum.Font.Code,
+	TextXAlignment = Enum.TextXAlignment.Right,
+	ZIndex = 3,
+}, bar)
+
+-- conteudo ------------------------------------------------------------------
+local content = mk("Frame", {
+	Size = UDim2.new(1, 0, 1, -TITLE_H),
+	Position = UDim2.fromOffset(0, TITLE_H),
+	BackgroundTransparency = 1,
+	ZIndex = 2,
 }, mf)
 
-local scale = Instance.new("UIScale")
-scale.Scale = 0.94
-scale.Parent = mf
-
--- input ----------------------------------------------------------------
-mk("TextLabel", {
-	Size = UDim2.fromOffset(bw, 12),
-	Position = UDim2.fromOffset(bx, 12),
+local toolbar = mk("Frame", {
+	Size = UDim2.new(1, -24, 0, 34),
+	Position = UDim2.fromOffset(12, 6),
 	BackgroundTransparency = 1,
-	Text = "JOB ID",
-	TextColor3 = C.dim,
-	TextSize = 10,
-	Font = Enum.Font.GothamBold,
-	TextXAlignment = Enum.TextXAlignment.Left,
-}, body)
+}, content)
 
-local field = mk("Frame", {
-	Size = UDim2.fromOffset(bw, 42),
-	Position = UDim2.fromOffset(bx, 32),
-	BackgroundColor3 = C.field,
+local function tool(label, x, w, run)
+	local b = mk("TextButton", {
+		Size = UDim2.new(w, -6, 1, 0),
+		Position = UDim2.new(x, 0, 0, 0),
+		BackgroundColor3 = run and C.mint or Color3.fromRGB(38, 42, 52),
+		BackgroundTransparency = run and 0 or 0.35,
+		BorderSizePixel = 0,
+		AutoButtonColor = false,
+		RichText = true,
+		Text = label,
+		TextColor3 = run and Color3.fromRGB(5, 22, 14) or C.text,
+		TextSize = 11,
+		Font = Enum.Font.GothamBold,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+	}, toolbar)
+	corner(b, 9)
+	stroke(b, run and C.mint or C.line, run and 0.5 or 0.55)
+	tapFx(b)
+	if not isTouch then
+		b.MouseEnter:Connect(function()
+			tween(b, { BackgroundTransparency = run and 0 or 0.15 }, 0.1)
+		end)
+		b.MouseLeave:Connect(function()
+			tween(b, { BackgroundTransparency = run and 0 or 0.35 }, 0.1)
+		end)
+	end
+	return b
+end
+
+local runBtn   = tool('<font color="#0B2A1A">▶</font> Executar', 0.00, 0.33, true)
+local clearBtn = tool("Limpar", 0.33, 0.21, false)
+local lineBtn  = tool("+ Linha", 0.54, 0.24, false)
+local copyBtn  = tool("Copiar", 0.78, 0.22, false)
+
+local well = mk("Frame", {
+	Size = UDim2.new(1, -24, 1, -128),
+	Position = UDim2.fromOffset(12, 50),
+	BackgroundColor3 = C.well,
+	BackgroundTransparency = 0.18,
 	BorderSizePixel = 0,
-}, body)
-corner(field, 10)
-local fstroke = stroke(field, C.line, 0.15)
+}, content)
+corner(well, 12)
+stroke(well, C.line, 0.5, true)
 
-local box = mk("TextBox", {
-	Size = UDim2.new(1, -68, 1, 0),
-	Position = UDim2.fromOffset(12, 0),
+local wellLine = mk("Frame", {
+	Size = UDim2.new(1, -20, 0, 1),
+	Position = UDim2.fromOffset(10, 8),
+	BackgroundColor3 = C.blue,
+	BackgroundTransparency = 0.82,
+	BorderSizePixel = 0,
+}, well)
+corner(wellLine, 999)
+
+local ed = mk("TextBox", {
+	Size = UDim2.new(1, -20, 1, -16),
+	Position = UDim2.fromOffset(10, 10),
 	BackgroundTransparency = 1,
 	Text = "",
-	PlaceholderText = "Cole o Job ID",
-	PlaceholderColor3 = Color3.fromRGB(96, 104, 120),
+	PlaceholderText = "-- cole seu script aqui",
+	PlaceholderColor3 = C.faint,
 	TextColor3 = C.text,
 	TextSize = 12,
 	Font = Enum.Font.Code,
 	TextXAlignment = Enum.TextXAlignment.Left,
-	TextTruncate = Enum.TextTruncate.AtEnd,
+	TextYAlignment = Enum.TextYAlignment.Top,
+	TextWrapped = true,
+	MultiLine = true,
 	ClearTextOnFocus = false,
-}, field)
+	TextEditable = true,
+	ZIndex = 2,
+}, well)
 
-local pasteBtn = mk("TextButton", {
-	Size = UDim2.fromOffset(48, 28),
-	AnchorPoint = Vector2.new(1, 0.5),
-	Position = UDim2.new(1, -7, 0.5, 0),
-	BackgroundColor3 = C.surf,
-	AutoButtonColor = false,
-	Text = "COLAR",
-	TextColor3 = C.dim,
-	TextSize = 9,
-	Font = Enum.Font.GothamBold,
-}, field)
-corner(pasteBtn, 7)
-tapFx(pasteBtn, 0.92)
-
-local srow = mk("Frame", {
-	Size = UDim2.fromOffset(bw, 18),
-	Position = UDim2.fromOffset(bx, 82),
+local out = mk("TextLabel", {
+	Size = UDim2.new(1, -24, 0, 44),
+	Position = UDim2.new(0, 12, 1, -72),
 	BackgroundTransparency = 1,
-}, body)
+	RichText = true,
+	Text = '<font color="#5C6474">-- aguardando script</font>',
+	TextColor3 = C.dim,
+	TextSize = 11,
+	Font = Enum.Font.Code,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextYAlignment = Enum.TextYAlignment.Top,
+	TextWrapped = false,
+	TextTruncate = Enum.TextTruncate.AtEnd,
+}, content)
 
-local dot = mk("Frame", {
-	Size = UDim2.fromOffset(6, 6),
-	Position = UDim2.fromOffset(0, 6),
-	BackgroundColor3 = C.dim,
-	BorderSizePixel = 0,
-}, srow)
-corner(dot, 999)
+local status = mk("Frame", {
+	Size = UDim2.new(1, 0, 0, 22),
+	Position = UDim2.new(0, 0, 1, -22),
+	BackgroundTransparency = 1,
+}, content)
 
-local stMsg = mk("TextLabel", {
-	Size = UDim2.new(1, -74, 1, 0),
+local stLeft = mk("TextLabel", {
+	Size = UDim2.new(0.5, -12, 1, 0),
 	Position = UDim2.fromOffset(12, 0),
 	BackgroundTransparency = 1,
-	Text = "Servidor atual",
-	TextColor3 = C.dim,
+	RichText = true,
+	Text = '<font color="#40E096">luau</font> · idle',
+	TextColor3 = C.faint,
 	TextSize = 10,
-	Font = Enum.Font.Gotham,
+	Font = Enum.Font.Code,
 	TextXAlignment = Enum.TextXAlignment.Left,
 	TextTruncate = Enum.TextTruncate.AtEnd,
-}, srow)
+}, status)
 
-local stNum = mk("TextLabel", {
-	Size = UDim2.fromOffset(62, 18),
+local stRight = mk("TextLabel", {
+	Size = UDim2.new(0.5, -30, 1, 0),
 	AnchorPoint = Vector2.new(1, 0),
-	Position = UDim2.new(1, 0, 0, 0),
+	Position = UDim2.new(1, -24, 0, 0),
 	BackgroundTransparency = 1,
-	Text = "0/0",
-	TextColor3 = C.dim,
+	Text = "0 ln · 0 ch",
+	TextColor3 = C.faint,
 	TextSize = 10,
 	Font = Enum.Font.Code,
 	TextXAlignment = Enum.TextXAlignment.Right,
-}, srow)
+}, status)
 
--- buttons --------------------------------------------------------------
-local function button(label, w, h, x, y, primary)
-	local b = mk("TextButton", {
-		Size = UDim2.fromOffset(w, h),
-		Position = UDim2.fromOffset(x, y),
-		BackgroundColor3 = primary and C.accent or C.surf,
-		AutoButtonColor = false,
-		Text = label,
-		TextColor3 = primary and Color3.new(1, 1, 1) or C.text,
-		TextSize = primary and 12 or 11,
-		Font = Enum.Font.GothamBold,
-		TextTruncate = Enum.TextTruncate.AtEnd,
-	}, body)
-	corner(b, primary and 10 or 9)
-	if not primary then stroke(b, C.line, 0.2) end
-
-	local sc = Instance.new("UIScale")
-	sc.Parent = b
-
-	local base = b.BackgroundColor3
-	if not isTouch then
-		b.MouseEnter:Connect(function() tween(b, { BackgroundColor3 = primary and Color3.fromRGB(104, 172, 255) or Color3.fromRGB(33, 37, 46) }, 0.1) end)
-		b.MouseLeave:Connect(function() tween(b, { BackgroundColor3 = base }, 0.1) end)
-	end
-	b.InputBegan:Connect(function(i)
-		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-			tween(sc, { Scale = 0.96 }, 0.07)
-		end
-	end)
-	b.InputEnded:Connect(function(i)
-		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-			tween(sc, { Scale = 1 }, 0.12, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-		end
-	end)
-	return b
-end
-
-local joinBtn = button("Entrar no servidor", bw, 42, bx, 108, true)
-local grad = Instance.new("UIGradient")
-grad.Color = ColorSequence.new(C.accent, C.accent2)
-grad.Parent = joinBtn
-
-local half = (bw - 8) / 2
-local copyBtn = button("Copiar meu ID", half, 38, bx, 158)
-local fullBtn = button("Servidor cheio", half, 38, bx + half + 8, 158)
-
-mk("TextLabel", {
-	Size = UDim2.fromOffset(bw, 12),
-	Position = UDim2.fromOffset(bx, 204),
+-- grip ----------------------------------------------------------------------
+local grip = mk("TextButton", {
+	Size = UDim2.fromOffset(18, 18),
+	AnchorPoint = Vector2.new(1, 1),
+	Position = UDim2.new(1, -3, 1, -2),
 	BackgroundTransparency = 1,
-	Text = isTouch and "Arraste pelo topo - segure o campo para colar" or "RightShift recolhe - Enter entra",
-	TextColor3 = Color3.fromRGB(88, 96, 112),
-	TextSize = 10,
-	Font = Enum.Font.Gotham,
-	TextXAlignment = Enum.TextXAlignment.Left,
-	TextTruncate = Enum.TextTruncate.AtEnd,
-}, body)
+	Text = "",
+	AutoButtonColor = false,
+	ZIndex = 6,
+}, content)
 
--- helpers --------------------------------------------------------------
-local function strip(s)
-	return (tostring(s):gsub("%s+", ""))
+for i = 1, 3 do
+	local l = mk("Frame", {
+		Size = UDim2.fromOffset(9 - i * 2, 1),
+		AnchorPoint = Vector2.new(1, 1),
+		Position = UDim2.new(1, -2, 1, -2 - i * 4),
+		BackgroundColor3 = C.faint,
+		BackgroundTransparency = 0.25,
+		BorderSizePixel = 0,
+		Rotation = -45,
+	}, grip)
+	corner(l, 999)
 end
 
-local function validId(id)
-	return #id == 36 and id:match("^%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$") ~= nil
+-- helpers -------------------------------------------------------------------
+local conns2 = {}
+local function track(c) conns2[#conns2 + 1] = c end
+
+local function esc(s)
+	return (tostring(s):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"))
 end
 
-local function httpGet(url)
-	local ok, body = pcall(function() return game:HttpGet(url) end)
-	if ok and type(body) == "string" and #body > 0 then return body end
-	local ok2, res = pcall(request, { Url = url, Method = "GET" })
-	if ok2 and type(res) == "table" and type(res.Body) == "string" then return res.Body end
+local logs = {}
+local MAX_LOG = 2
+
+local function log(msg, kind)
+	local color = kind == "bad" and "#FF9C97" or kind == "ok" and "#7DEFB6" or "#8A92A2"
+	local line = esc(msg):gsub("[\r\n\t]+", " ")
+	if #line > 130 then line = line:sub(1, 127) .. "..." end
+	logs[#logs + 1] = ('<font color="%s">%s</font>'):format(color, line)
+	while #logs > MAX_LOG do table.remove(logs, 1) end
+	out.Text = table.concat(logs, "\n")
 end
 
-local cache, CACHE_TTL = {}, 12
-
-local function servers(placeId)
-	local hit = cache[placeId]
-	if hit and os.clock() - hit.at < CACHE_TTL then return hit.list end
-
-	local list, cursor = {}, nil
-	for _ = 1, 3 do
-		local url = string.format("https://games.roblox.com/v1/games/%d/servers/Public?limit=100", placeId)
-		if cursor then url = url .. "&cursor=" .. Http:UrlEncode(cursor) end
-
-		local raw = httpGet(url)
-		if not raw then break end
-
-		local ok, data = pcall(function() return Http:JSONDecode(raw) end)
-		if not ok or type(data) ~= "table" then break end
-
-		for _, s in ipairs(data.data or {}) do list[#list + 1] = s end
-		cursor = data.nextPageCursor
-		if not cursor then break end
-		task.wait(0.08)
-	end
-
-	if #list > 0 then cache[placeId] = { at = os.clock(), list = list } end
-	return list
-end
-
-local function findServer(id)
-	for _, s in ipairs(servers(game.PlaceId)) do
-		if s.id == id then return s end
-	end
-end
-
--- state ----------------------------------------------------------------
-local token = 0
-local closed = false
-
-local function setState(msg, color)
-	dot.BackgroundColor3 = color
-	stMsg.Text = msg
-	stMsg.TextColor3 = color
-end
-
-local function setCount(a, b)
-	stNum.Text = (a and b) and (a .. "/" .. b) or "—"
-	stNum.TextColor3 = (a and b) and C.text or C.dim
-end
-
-local function localPlayers()
-	return #Players:GetPlayers(), Players.MaxPlayers
-end
-
-local function inspect(raw)
-	if closed then return end
-	local id = strip(raw)
-	token = token + 1
-	local mine = token
-
-	if id == "" or id == game.JobId then
-		local p, m = localPlayers()
-		setState(id == "" and "Servidor atual" or "Você está aqui", id == "" and C.dim or C.ok)
-		setCount(p, m)
-		return
-	end
-	if #id ~= 36 then
-		setState("Job ID incompleto", C.dim)
-		setCount(nil)
-		return
-	end
-
-	setState("Procurando servidor", C.dim)
-	setCount(nil)
-
-	task.spawn(function()
-		local srv = findServer(id)
-		if closed or mine ~= token then return end
-		if srv then
-			setState("Servidor encontrado", C.ok)
-			setCount(srv.playing, srv.maxPlayers)
-		else
-			setState("Privado ou não listado", C.bad)
-			setCount(nil)
-		end
-	end)
-end
-
-local function flash(msg, color)
-	if closed then return end
-	token = token + 1
-	local mine = token
-	setState(msg, color)
-	task.delay(2, function()
-		if mine == token and not closed then inspect(box.Text) end
-	end)
-end
-
-local busy = false
-local function resetJoin()
-	busy = false
-	joinBtn.Text = "Entrar no servidor"
-end
-
-local function join(raw)
-	local id = strip(raw)
-	if busy or closed then return end
-	if id == "" then return flash("Cole um Job ID", C.bad) end
-	if not validId(id) then return flash("Job ID inválido", C.bad) end
-	if id == game.JobId then return flash("Você já está aqui", C.dim) end
-
-	busy = true
-	joinBtn.Text = "Conectando..."
-	setState("Teleportando...", C.accent)
-
-	local ok = pcall(function()
-		Teleport:TeleportToPlaceInstance(game.PlaceId, id, lp)
-	end)
-	if not ok then
-		resetJoin()
-		flash("Falha ao teleportar", C.bad)
-		return
-	end
-	task.delay(8, function() if busy then resetJoin() end end)
-end
-
-local function setClip(text)
+local function clip(text)
 	local ok = pcall(function() setclipboard(text) end)
 	if ok then return true end
 	ok = pcall(function() toclipboard(text) end)
 	if ok then return true end
-	ok = pcall(function() writeclipboard(text) end)
-	return ok
+	return pcall(function() writeclipboard(text) end)
 end
 
-local function readClip()
-	local ok, v = pcall(function() return getclipboard() end)
-	if ok and type(v) == "string" then return v end
-	ok, v = pcall(function() return readclipboard() end)
-	if ok and type(v) == "string" then return v end
+local function updateStatus()
+	local text = ed.Text
+	local lines = text == "" and 0 or select(2, text:gsub("\n", "")) + 1
+	local size = mf.AbsoluteSize
+	stRight.Text = ("%d ln · %d ch · %dx%d"):format(lines, #text, math.floor(size.X), math.floor(size.Y))
 end
 
--- interactions ---------------------------------------------------------
-box:GetPropertyChangedSignal("Text"):Connect(function()
-	token = token + 1
-	local mine = token
-	task.delay(0.35, function()
-		if mine == token then inspect(box.Text) end
-	end)
-end)
-
-box.Focused:Connect(function()
-	tween(fstroke, { Color = C.accent, Transparency = 0 }, 0.12)
-end)
-
-box.FocusLost:Connect(function(enter)
-	tween(fstroke, { Color = C.line, Transparency = 0.15 }, 0.12)
-	inspect(box.Text)
-	if enter then join(box.Text) end
-end)
-
-joinBtn.MouseButton1Click:Connect(function() join(box.Text) end)
-
-copyBtn.MouseButton1Click:Connect(function()
-	if setClip(game.JobId) then
-		flash("ID copiado", C.ok)
-	else
-		box.Text = game.JobId
-		flash("ID colocado no campo", C.dim)
+local function run()
+	local code = ed.Text
+	if not code:find("%S") then
+		log("nada para executar", "bad")
+		return
 	end
-end)
-
-pasteBtn.MouseButton1Click:Connect(function()
-	local v = readClip()
-	if v then
-		local found = tostring(v):match("%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x")
-		if found then
-			box.Text = found
-			inspect(found)
-			flash("ID colado", C.ok)
-			return
-		end
+	local loader = loadstring or load
+	if not loader then
+		log("loadstring indisponível neste ambiente", "bad")
+		return
 	end
-	box:CaptureFocus()
-	flash("Nada válido na área de transferência", C.dim)
-end)
+	local fn, err = loader(code, "=console")
+	if not fn then
+		log(err, "bad")
+		return
+	end
 
-fullBtn.MouseButton1Click:Connect(function()
-	if busy or closed then return end
-	setState("Procurando servidor cheio", C.dim)
-	setCount(nil)
-	task.spawn(function()
-		if closed then return end
-		local list = servers(game.PlaceId)
-		if closed then return end
-		local best, n = nil, -1
-		for _, s in ipairs(list) do
-			local playing = s.playing or 0
-			if s.id ~= game.JobId and playing > n and playing < (s.maxPlayers or 0) then
-				best, n = s, playing
+	if setfenv and getfenv then
+		pcall(function()
+			local base = getfenv(fn)
+			local function join(...)
+				local t = table.pack(...)
+				local o = {}
+				for i = 1, t.n do o[i] = tostring(t[i]) end
+				return table.concat(o, " ")
 			end
-		end
-		best = best or list[1]
-		if best then
-			box.Text = best.id
-			join(best.id)
+			local env = setmetatable({
+				print = function(...) log(join(...), "ok") end,
+				warn = function(...) log(join(...), "dim") end,
+			}, { __index = base, __newindex = base })
+			setfenv(fn, env)
+		end)
+	end
+
+	stLeft.Text = '<font color="#40E096">luau</font> · executando'
+	log("executando...", "dim")
+	task.spawn(function()
+		local ok, res = pcall(fn)
+		if ok then
+			stLeft.Text = '<font color="#40E096">luau</font> · ok'
+			if res ~= nil then log("retorno: " .. tostring(res), "ok") end
 		else
-			flash("Nenhum servidor disponível", C.bad)
+			stLeft.Text = '<font color="#FF9C97">luau</font> · erro'
+			log(tostring(res), "bad")
 		end
 	end)
-end)
-
-local function refreshLocal()
-	if closed then return end
-	local id = strip(box.Text)
-	if id == "" or id == game.JobId then
-		local p, m = localPlayers()
-		setCount(p, m)
-	end
 end
 
-on(Players.PlayerAdded, refreshLocal)
-on(Players.PlayerRemoving, refreshLocal)
-
-on(Teleport.TeleportInitFailed, function(_, result, msg)
-	if not busy then return end
-	resetJoin()
-	flash(tostring(result) .. " " .. tostring(msg):sub(1, 28), C.bad)
+-- botoes --------------------------------------------------------------------
+runBtn.MouseButton1Click:Connect(run)
+clearBtn.MouseButton1Click:Connect(function()
+	ed.Text = ""
+	logs = {}
+	out.Text = '<font color="#5C6474">-- limpo</font>'
+	stLeft.Text = '<font color="#40E096">luau</font> · idle'
+	updateStatus()
 end)
+lineBtn.MouseButton1Click:Connect(function()
+	ed.Text = ed.Text .. "\n"
+	ed:CaptureFocus()
+	updateStatus()
+end)
+copyBtn.MouseButton1Click:Connect(function()
+	if ed.Text == "" then
+		log("nada para copiar", "dim")
+	elseif clip(ed.Text) then
+		log("script copiado", "ok")
+	else
+		log("clipboard indisponível", "bad")
+	end
+end)
+ed:GetPropertyChangedSignal("Text"):Connect(updateStatus)
+updateStatus()
 
--- drag -----------------------------------------------------------------
-local dragging, dragStart, startPos = false, nil, nil
+if not isTouch then
+	on(UIS.InputBegan, function(i, gp)
+		if gp then return end
+		local ctrl = UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl)
+		if not ctrl then return end
+		if i.KeyCode == Enum.KeyCode.Return then
+			run()
+		elseif i.KeyCode == Enum.KeyCode.L then
+			clearBtn:Activate()
+		end
+	end)
+end
 
-head.InputBegan:Connect(function(i)
+-- arrastar ------------------------------------------------------------------
+local dragging, dragStart, dragPos = false, nil, nil
+
+bar.InputBegan:Connect(function(i)
 	if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
 		dragging = true
 		dragStart = i.Position
-		startPos = mf.Position
-		i.Changed:Connect(function()
+		dragPos = mf.Position
+		track(i.Changed:Connect(function()
 			if i.UserInputState == Enum.UserInputState.End then dragging = false end
-		end)
+		end))
 	end
 end)
 
@@ -602,62 +550,120 @@ on(UIS.InputChanged, function(i)
 	if not dragging then return end
 	if i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch then
 		local d = i.Position - dragStart
-		mf.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+		mf.Position = UDim2.new(dragPos.X.Scale, dragPos.X.Offset + d.X, dragPos.Y.Scale, dragPos.Y.Offset + d.Y)
 	end
 end)
 
--- minimize / close -----------------------------------------------------
-local collapsed = false
+-- redimensionar -------------------------------------------------------------
+local sizing, sizeStart, size0 = false, nil, nil
 
-local function setCollapsed(v)
-	collapsed = v
-	minBtn.Text = v and "+" or "-"
-	body.Visible = not v
-	tween(mf, { Size = UDim2.fromOffset(W, v and 44 or H) }, 0.22, Enum.EasingStyle.Quint)
+grip.InputBegan:Connect(function(i)
+	if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+		sizing = true
+		sizeStart = i.Position
+		size0 = mf.AbsoluteSize
+		track(i.Changed:Connect(function()
+			if i.UserInputState == Enum.UserInputState.End then sizing = false end
+		end))
+	end
+end)
+
+on(UIS.InputChanged, function(i)
+	if not sizing then return end
+	if i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch then
+		local d = i.Position - sizeStart
+		local nx = math.clamp(size0.X + d.X, 280, vp.X - 12)
+		local ny = math.clamp(size0.Y + d.Y, 240, vp.Y - 12)
+		mf.Size = UDim2.fromOffset(nx, ny)
+		updateStatus()
+	end
+end)
+
+-- janela --------------------------------------------------------------------
+local saved = nil
+local minimized = false
+local miniSize, miniPos = UDim2.fromOffset(W, H), mf.Position
+
+local function maximize()
+	if minimized then return end
+	if saved then
+		mf.Size = saved.size
+		mf.Position = saved.pos
+		saved = nil
+		tween(dot, { BackgroundColor3 = C.mint }, 0.15)
+	else
+		saved = { size = mf.Size, pos = mf.Position }
+		tween(mf, { Size = UDim2.fromOffset(vp.X - 16, vp.Y - 16) }, 0.18, Enum.EasingStyle.Quint)
+		tween(mf, { Position = UDim2.fromOffset(8, 8) }, 0.18, Enum.EasingStyle.Quint)
+		tween(dot, { BackgroundColor3 = C.blue }, 0.15)
+	end
+	updateStatus()
 end
 
-minBtn.MouseButton1Click:Connect(function() setCollapsed(not collapsed) end)
+local function minimize()
+	minimized = not minimized
+	if minimized then
+		miniSize, miniPos = mf.Size, mf.Position
+		mf.ClipsDescendants = true
+		content.Visible = false
+		sheen.Visible = false
+		glow.Visible = false
+		tween(mf, { Size = UDim2.fromOffset(mf.AbsoluteSize.X, TITLE_H) }, 0.16, Enum.EasingStyle.Quint)
+	else
+		content.Visible = true
+		sheen.Visible = true
+		glow.Visible = true
+		mf.Position = miniPos
+		tween(mf, { Size = miniSize }, 0.18, Enum.EasingStyle.Quint)
+		task.delay(0.18, function()
+			if not minimized then mf.ClipsDescendants = false end
+		end)
+	end
+end
 
+local closed = false
 local function close()
 	if closed then return end
 	closed = true
 	for i = #conns, 1, -1 do pcall(function() conns[i]:Disconnect() end) end
-	pcall(function() getgenv().JobJoinerPro = nil end)
-	tween(scale, { Scale = 0.94 }, 0.1)
+	for i = #conns2, 1, -1 do pcall(function() conns2[i]:Disconnect() end) end
+	pcall(function() getgenv().GlassTerminal = nil end)
+	local s = mf:FindFirstChildOfClass("UIScale")
+	if s then tween(s, { Scale = 0.96 }, 0.1) end
 	task.delay(0.11, function() sg:Destroy() end)
 end
 
-closeBtn.MouseButton1Click:Connect(close)
+closeL.MouseButton1Click:Connect(close)
+minL.MouseButton1Click:Connect(minimize)
+maxL.MouseButton1Click:Connect(maximize)
 
-if not isTouch then
-	on(UIS.InputBegan, function(i, gp)
-		if gp then return end
-		if i.KeyCode == Enum.KeyCode.RightShift then
-			setCollapsed(not collapsed)
-		end
+-- teclado do celular cobre a janela: sobe enquanto digita
+if isTouch then
+	local raised, home = false, mf.Position
+	ed.Focused:Connect(function()
+		if raised then return end
+		raised = true
+		home = mf.Position
+		tween(mf, { Position = UDim2.fromOffset(home.X.Offset, 12) }, 0.18)
+	end)
+	ed.FocusLost:Connect(function()
+		if not raised then return end
+		raised = false
+		tween(mf, { Position = home }, 0.18)
 	end)
 end
 
 pcall(function()
-	getgenv().JobJoinerPro = { close = close }
+	getgenv().GlassTerminal = { close = close }
 end)
 
--- abrir ----------------------------------------------------------------
-tween(scale, { Scale = 1 }, 0.18, Enum.EasingStyle.Quint)
-inspect("")
+-- abrir ---------------------------------------------------------------------
+local sc = Instance.new("UIScale")
+sc.Scale = 0.96
+sc.Parent = mf
+tween(sc, { Scale = 1 }, 0.16, Enum.EasingStyle.Quint)
 
-if isTouch then
-	-- teclado do celular cobre o painel: sobe enquanto digita e volta depois
-	local saved
-	box.Focused:Connect(function()
-		if saved or closed then return end
-		saved = mf.Position
-		tween(mf, { Position = UDim2.new(saved.X.Scale, saved.X.Offset, 0.3, 0) }, 0.18)
-	end)
-	box.FocusLost:Connect(function()
-		if not saved or closed then return end
-		local pos = saved
-		saved = nil
-		tween(mf, { Position = pos }, 0.18)
-	end)
-end
+-- brilho liquido: deriva lenta do gradiente (barato, 1 tween em loop)
+Tween:Create(sheenGrad, TweenInfo.new(7, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
+	Offset = Vector2.new(0, 0.22),
+}):Play()
