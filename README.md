@@ -3,11 +3,13 @@
 	Linhas, syntax highlight, temas, tema atual na linha, erro na linha, glass em tudo.
 ]]
 
-local Players     = game:GetService("Players")
-local Tween       = game:GetService("TweenService")
-local UIS         = game:GetService("UserInputService")
-local TextService = game:GetService("TextService")
-local RunService  = game:GetService("RunService")
+local Players      = game:GetService("Players")
+local Tween        = game:GetService("TweenService")
+local UIS          = game:GetService("UserInputService")
+local TextService  = game:GetService("TextService")
+local RunService   = game:GetService("RunService")
+local SoundService = game:GetService("SoundService")
+local HttpService  = game:GetService("HttpService")
 
 local lp      = Players.LocalPlayer
 local isTouch = UIS.TouchEnabled and not UIS.KeyboardEnabled
@@ -62,9 +64,56 @@ local THEMES = {
 		kw    = "#DDBB92", str = "#A8C48A", com = "#6A5F52", fnc = "#E0B070",
 		bi    = "#C9A87B", punc = "#8A7C6B", base = "#DED2C2",
 	},
+	{
+		name = "nord",
+		bg    = Color3.fromRGB(21, 24, 30),
+		panel = Color3.fromRGB(17, 20, 26),
+		well  = Color3.fromRGB(9, 11, 15),
+		line  = Color3.fromRGB(38, 43, 53),
+		text  = Color3.fromRGB(216, 222, 233),
+		dim   = Color3.fromRGB(136, 146, 161),
+		faint = Color3.fromRGB(84, 94, 110),
+		accent= Color3.fromRGB(136, 192, 208),
+		red   = Color3.fromRGB(191, 97, 106),
+		num   = Color3.fromRGB(235, 203, 139),
+		kw    = "#81A1C1", str = "#A3BE8C", com = "#616E88", fnc = "#88C0D0",
+		bi    = "#8FBCBB", punc = "#7B88A1", base = "#D8DEE9",
+	},
+	{
+		name = "plum",
+		bg    = Color3.fromRGB(24, 20, 29),
+		panel = Color3.fromRGB(19, 16, 23),
+		well  = Color3.fromRGB(11, 9, 14),
+		line  = Color3.fromRGB(45, 38, 52),
+		text  = Color3.fromRGB(226, 215, 232),
+		dim   = Color3.fromRGB(154, 140, 163),
+		faint = Color3.fromRGB(96, 84, 105),
+		accent= Color3.fromRGB(199, 153, 255),
+		red   = Color3.fromRGB(232, 122, 131),
+		num   = Color3.fromRGB(235, 199, 131),
+		kw    = "#C9A0FF", str = "#A6D99B", com = "#6B5E77", fnc = "#B3A1FF",
+		bi    = "#8FD0E0", punc = "#8E7F99", base = "#DDD2E4",
+	},
+	{
+		name = "moss",
+		bg    = Color3.fromRGB(20, 26, 22),
+		panel = Color3.fromRGB(16, 21, 18),
+		well  = Color3.fromRGB(9, 12, 10),
+		line  = Color3.fromRGB(38, 46, 40),
+		text  = Color3.fromRGB(211, 223, 214),
+		dim   = Color3.fromRGB(136, 150, 140),
+		faint = Color3.fromRGB(82, 95, 86),
+		accent= Color3.fromRGB(140, 200, 150),
+		red   = Color3.fromRGB(214, 110, 100),
+		num   = Color3.fromRGB(224, 190, 120),
+		kw    = "#A9CFA0", str = "#B6D98C", com = "#5C6B5F", fnc = "#8FC6B0",
+		bi    = "#7FC2B8", punc = "#7E8F82", base = "#CBD9CD",
+	},
 }
 
 local T = THEMES[1]
+local themeIndex = 1
+local soundOn = true
 
 local function hex(c)
 	return ("#%02X%02X%02X"):format(math.floor(c.R * 255), math.floor(c.G * 255), math.floor(c.B * 255))
@@ -131,11 +180,29 @@ local function on(sig, fn)
 	return c
 end
 
-local function press(b)
+local oldSnd = SoundService:FindFirstChild("TerminalClick")
+if oldSnd then oldSnd:Destroy() end
+
+local snd = mk("Sound", {
+	Name = "TerminalClick",
+	SoundId = "rbxasset://sounds/electronicPing.wav",
+	Volume = 0.13,
+	PlaybackSpeed = 2.1,
+}, SoundService)
+
+local function sfx(pitch)
+	if not soundOn then return end
+	snd.PlaybackSpeed = pitch or 2.1
+	snd.TimePosition = 0
+	snd:Play()
+end
+
+local function press(b, pitch)
 	local sc = Instance.new("UIScale")
 	sc.Parent = b
 	b.InputBegan:Connect(function(i)
 		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+			sfx(pitch)
 			tween(sc, { Scale = 0.95 }, 0.06)
 		end
 	end)
@@ -307,7 +374,7 @@ local title = mk("TextLabel", {
 bind(title, "TextColor3", "dim")
 
 -- barra de abas ---------------------------------------------------------------
-local tabs = mk("Frame", {
+local tabBar = mk("Frame", {
 	Size = UDim2.new(1, 0, 0, TAB_H),
 	Position = UDim2.fromOffset(0, TITLE_H),
 	BackgroundColor3 = T.panel,
@@ -315,45 +382,108 @@ local tabs = mk("Frame", {
 	BorderSizePixel = 0,
 	ZIndex = 4,
 }, win)
-bind(tabs, "BackgroundColor3", "panel")
-hairline(tabs, 1, -1)
+bind(tabBar, "BackgroundColor3", "panel")
+hairline(tabBar, 1, -1)
 
-local tab = mk("TextButton", {
-	Size = UDim2.fromOffset(128, 18),
-	Position = UDim2.fromOffset(9, 3),
-	BackgroundColor3 = T.bg,
-	BackgroundTransparency = 0.3,
-	BorderSizePixel = 0,
-	Text = "",
-	AutoButtonColor = false,
-	ZIndex = 5,
-}, tabs)
-corner(tab, 5)
-bind(tab, "BackgroundColor3", "bg")
+local tabState = {
+	list = { { name = "untitled.luau", code = "" } },
+	active = 1,
+}
 
-local tabLabel = mk("TextLabel", {
-	Size = UDim2.new(1, -22, 1, 0),
-	Position = UDim2.fromOffset(8, 0),
+local switchTab, closeTab, openRename, newTab
+
+local tabStrip = mk("ScrollingFrame", {
+	Size = UDim2.new(1, -78, 0, 19),
+	Position = UDim2.fromOffset(8, 3),
 	BackgroundTransparency = 1,
-	Text = "untitled.luau",
-	TextColor3 = T.text,
-	TextSize = 10,
-	Font = FONT,
-	TextXAlignment = Enum.TextXAlignment.Left,
-	ZIndex = 6,
-}, tab)
-bind(tabLabel, "TextColor3", "text")
-
-local tabDot = mk("Frame", {
-	Size = UDim2.fromOffset(4, 4),
-	AnchorPoint = Vector2.new(1, 0.5),
-	Position = UDim2.new(1, -7, 0.5, 0),
-	BackgroundColor3 = T.accent,
 	BorderSizePixel = 0,
-	ZIndex = 6,
-}, tab)
-corner(tabDot, 999)
-bind(tabDot, "BackgroundColor3", "accent")
+	ScrollBarThickness = 0,
+	ScrollingDirection = Enum.ScrollingDirection.X,
+	ElasticBehavior = Enum.ElasticBehavior.Never,
+	CanvasSize = UDim2.new(0, 0, 0, 0),
+	ZIndex = 5,
+}, tabBar)
+
+local function buildTabs()
+	for _, c in ipairs(tabStrip:GetChildren()) do
+		if c:IsA("GuiObject") then c:Destroy() end
+	end
+	for i, t in ipairs(tabState.list) do
+		local act = i == tabState.active
+		local pill = mk("TextButton", {
+			Size = UDim2.fromOffset(104, 19),
+			Position = UDim2.fromOffset((i - 1) * 107, 0),
+			BackgroundColor3 = act and T.bg or T.panel,
+			BackgroundTransparency = act and 0.18 or 0.72,
+			BorderSizePixel = 0,
+			Text = "",
+			AutoButtonColor = false,
+			ZIndex = 5,
+		}, tabStrip)
+		corner(pill, 5)
+
+		mk("TextLabel", {
+			Size = UDim2.new(1, -28, 1, 0),
+			Position = UDim2.fromOffset(8, 0),
+			BackgroundTransparency = 1,
+			Text = t.name,
+			TextColor3 = act and T.text or T.dim,
+			TextSize = 10,
+			Font = FONT,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			ZIndex = 6,
+		}, pill)
+
+		local xBtn = mk("TextButton", {
+			Size = UDim2.fromOffset(14, 14),
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, -4, 0.5, 0),
+			BackgroundTransparency = 1,
+			Text = "×",
+			TextColor3 = act and T.dim or T.faint,
+			TextSize = 11,
+			Font = FONT,
+			AutoButtonColor = false,
+			ZIndex = 7,
+		}, pill)
+		press(xBtn, 1.4)
+		xBtn.MouseButton1Click:Connect(function()
+			if closeTab then closeTab(i) end
+		end)
+
+		if act then
+			local u = mk("Frame", {
+				Size = UDim2.new(1, -16, 0, 1),
+				Position = UDim2.new(0, 8, 1, -2),
+				BackgroundColor3 = T.accent,
+				BorderSizePixel = 0,
+				ZIndex = 7,
+			}, pill)
+			corner(u, 99)
+		end
+
+		press(pill, 2.2)
+		local lastTap, lastIdx = 0, 0
+		pill.MouseButton1Click:Connect(function()
+			local now = os.clock()
+			if act and lastIdx == i and now - lastTap < 0.45 then
+				if openRename then openRename() end
+			elseif switchTab then
+				switchTab(i)
+			end
+			lastTap, lastIdx = now, i
+		end)
+	end
+	tabStrip.CanvasSize = UDim2.new(0, #tabState.list * 107, 0, 19)
+	tabStrip.CanvasPosition = Vector2.new(0, 0)
+
+	local sw = tabStrip.AbsoluteSize.X
+	local x = (tabState.active - 1) * 107
+	if sw > 0 and x + 104 > sw then
+		tabStrip.CanvasPosition = Vector2.new(x + 104 - sw + 6, 0)
+	end
+end
 
 -- barra de acoes --------------------------------------------------------------
 local tool = mk("Frame", {
@@ -412,6 +542,22 @@ smallBtn.AnchorPoint = Vector2.new(1, 0)
 smallBtn.Position = UDim2.new(1, -76, 0, 5)
 smallBtn.TextSize = 9
 bind(smallBtn, "TextColor3", "dim")
+
+local addBtn = ghost("+", 0, 18, T.dim, tabBar)
+addBtn.AnchorPoint = Vector2.new(1, 0)
+addBtn.Position = UDim2.new(1, -42, 0, 3)
+addBtn.TextSize = 13
+bind(addBtn, "TextColor3", "dim")
+
+local sfxBtn = ghost("sfx", 0, 26, T.dim, tabBar)
+sfxBtn.AnchorPoint = Vector2.new(1, 0)
+sfxBtn.Position = UDim2.new(1, -8, 0, 3)
+sfxBtn.TextSize = 9
+
+local function updateSfxBtn()
+	sfxBtn.TextColor3 = soundOn and T.accent or T.faint
+	sfxBtn.TextTransparency = soundOn and 0 or 0.35
+end
 
 local shimmer = mk("Frame", {
 	Size = UDim2.new(0.4, 0, 0, 1),
@@ -476,7 +622,7 @@ local emptyHint = mk("TextLabel", {
 	Size = UDim2.new(1, 0, 0, 16),
 	Position = UDim2.new(0, 0, 1, -84),
 	BackgroundTransparency = 1,
-	Text = "-- run para comecar",
+	Text = "-- run · toque 2x na aba p/ renomear",
 	TextColor3 = T.faint,
 	TextSize = 10,
 	Font = FONT,
@@ -677,6 +823,84 @@ for i = 1, 3 do
 	}, grip)
 	corner(l, 999)
 end
+
+-- dialogo de renomear ---------------------------------------------------------
+local dlg = mk("Frame", {
+	Size = UDim2.new(1, 0, 1, 0),
+	BackgroundTransparency = 1,
+	BorderSizePixel = 0,
+	Visible = false,
+	ZIndex = 30,
+}, win)
+corner(dlg, 12)
+
+local veil = mk("TextButton", {
+	Size = UDim2.new(1, 0, 1, 0),
+	BackgroundColor3 = Color3.new(0, 0, 0),
+	BackgroundTransparency = 0.55,
+	BorderSizePixel = 0,
+	Text = "",
+	AutoButtonColor = false,
+	ZIndex = 30,
+}, dlg)
+corner(veil, 12)
+
+local card = mk("Frame", {
+	Size = UDim2.fromOffset(232, 104),
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.new(0.5, 0, 0.42, 0),
+	BackgroundColor3 = T.panel,
+	BackgroundTransparency = 0.05,
+	BorderSizePixel = 0,
+	Active = true,
+	ZIndex = 31,
+}, dlg)
+corner(card, 10)
+local cardStroke = stroke(card, 0.1)
+bind(card, "BackgroundColor3", "panel")
+bind(cardStroke, "Color", "line")
+
+local dlgLabel = mk("TextLabel", {
+	Size = UDim2.new(1, -28, 0, 14),
+	Position = UDim2.fromOffset(14, 12),
+	BackgroundTransparency = 1,
+	Text = "nome da aba",
+	TextColor3 = T.dim,
+	TextSize = 10,
+	Font = FONT,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	ZIndex = 32,
+}, card)
+bind(dlgLabel, "TextColor3", "dim")
+
+local nameBox = mk("TextBox", {
+	Size = UDim2.new(1, -28, 0, 26),
+	Position = UDim2.fromOffset(14, 30),
+	BackgroundColor3 = T.well,
+	BackgroundTransparency = 0.05,
+	BorderSizePixel = 0,
+	Text = "",
+	PlaceholderText = "script.luau",
+	PlaceholderColor3 = T.faint,
+	TextColor3 = T.text,
+	TextSize = 12,
+	Font = FONT,
+	ClearTextOnFocus = false,
+	ZIndex = 32,
+}, card)
+corner(nameBox, 5)
+bind(nameBox, "BackgroundColor3", "well")
+bind(nameBox, "TextColor3", "text")
+
+local cancelBtn = ghost("cancelar", 14, 96, T.dim, card)
+cancelBtn.Position = UDim2.fromOffset(14, 66)
+cancelBtn.TextSize = 10
+bind(cancelBtn, "TextColor3", "dim")
+
+local okBtn = ghost("salvar", 118, 100, T.accent, card)
+okBtn.Position = UDim2.fromOffset(118, 66)
+okBtn.TextSize = 10
+bind(okBtn, "TextColor3", "accent")
 
 -- syntax highlight ------------------------------------------------------------
 local KW = {}
@@ -883,6 +1107,177 @@ local function render()
 	view.Text = hl(ed.Text)
 end
 
+-- abas e persistencia ---------------------------------------------------------
+local FILE = "terminal-macos.json"
+local saveStamp = 0
+local pendingSize = nil
+local lastTap = 0
+
+local function fsOK()
+	return type(writefile) == "function" and type(readfile) == "function"
+end
+
+local function commit()
+	local t = tabState.list[tabState.active]
+	if t then t.code = ed.Text end
+end
+
+local function packStore()
+	local list = {}
+	for i, t in ipairs(tabState.list) do
+		list[i] = { name = t.name, code = t.code }
+	end
+	return {
+		v = 1,
+		active = tabState.active,
+		theme = T.name,
+		size = SIZE,
+		sfx = soundOn,
+		tabs = list,
+	}
+end
+
+local function saveNow()
+	if not fsOK() then return end
+	pcall(function()
+		writefile(FILE, HttpService:JSONEncode(packStore()))
+	end)
+end
+
+local function saveSoon()
+	if not fsOK() then return end
+	saveStamp = saveStamp + 1
+	local me = saveStamp
+	task.delay(0.7, function()
+		if me == saveStamp then
+			saveNow()
+		end
+	end)
+end
+
+local function swapTo(i)
+	tabState.active = math.clamp(i, 1, #tabState.list)
+	errorLine = nil
+	currentLine = 1
+	ed.Text = tabState.list[tabState.active].code
+	task.defer(buildTabs)
+	layout()
+	render()
+	scroll.CanvasPosition = Vector2.new(0, 0)
+end
+
+switchTab = function(i)
+	if i == tabState.active then return end
+	commit()
+	swapTo(i)
+	saveSoon()
+end
+
+function closeTab(i)
+	commit()
+	if #tabState.list == 1 then
+		tabState.list[1] = { name = "untitled.luau", code = "" }
+		swapTo(1)
+		log("ultima aba limpa", "dim")
+		saveSoon()
+		return
+	end
+	local a = tabState.active
+	table.remove(tabState.list, i)
+	if i < a then
+		a = a - 1
+	elseif i == a then
+		a = math.min(i, #tabState.list)
+	end
+	swapTo(a)
+	saveSoon()
+end
+
+function newTab()
+	commit()
+	local n, name = 1, "untitled.luau"
+	while true do
+		name = n == 1 and "untitled.luau" or ("untitled-" .. n .. ".luau")
+		local taken = false
+		for _, t in ipairs(tabState.list) do
+			if t.name == name then taken = true end
+		end
+		if not taken then break end
+		n = n + 1
+	end
+	table.insert(tabState.list, tabState.active + 1, { name = name, code = "" })
+	swapTo(tabState.active + 1)
+	saveSoon()
+end
+
+local function closeDlg()
+	dlg.Visible = false
+	pcall(function() nameBox:ReleaseFocus() end)
+end
+
+local function applyRename()
+	local nm = nameBox.Text:gsub("^%s+", ""):gsub("%s+$", "")
+	if nm == "" then
+		closeDlg()
+		return
+	end
+	tabState.list[tabState.active].name = nm:sub(1, 22)
+	buildTabs()
+	saveSoon()
+	closeDlg()
+end
+
+function openRename()
+	lastTap = os.clock()
+	pcall(function() ed:ReleaseFocus() end)
+	nameBox.Text = tabState.list[tabState.active].name
+	dlg.Visible = true
+	task.defer(function()
+		if not dlg.Visible then return end
+		pcall(function()
+			nameBox:CaptureFocus()
+			nameBox.SelectionStart = 1
+			nameBox.CursorPosition = #nameBox.Text + 1
+		end)
+	end)
+end
+
+local function loadStore()
+	if not fsOK() then return false end
+	local raw
+	pcall(function()
+		if isfile == nil or isfile(FILE) then raw = readfile(FILE) end
+	end)
+	if type(raw) ~= "string" or raw == "" then return false end
+	local ok, data = pcall(function() return HttpService:JSONDecode(raw) end)
+	if not ok or type(data) ~= "table" then return false end
+
+	if type(data.tabs) == "table" then
+		local list = {}
+		for _, t in ipairs(data.tabs) do
+			if type(t) == "table" and type(t.name) == "string" then
+				list[#list + 1] = {
+					name = t.name:sub(1, 22),
+					code = type(t.code) == "string" and t.code or "",
+				}
+			end
+		end
+		if #list > 0 then tabState.list = list end
+	end
+	tabState.active = math.clamp(tonumber(data.active) or 1, 1, #tabState.list)
+
+	if type(data.theme) == "string" then
+		for i, th in ipairs(THEMES) do
+			if th.name == data.theme then themeIndex = i end
+		end
+	end
+	if type(data.size) == "number" then
+		pendingSize = math.clamp(math.floor(data.size), 10, 16)
+	end
+	if type(data.sfx) == "boolean" then soundOn = data.sfx end
+	return true
+end
+
 local function startShimmer()
 	shimmer.Visible = true
 	if shimmerTween then shimmerTween:Cancel() end
@@ -950,6 +1345,7 @@ local function run()
 		local ok, res = pcall(fn)
 		lastMs = math.floor((os.clock() - t0) * 1000)
 		stopShimmer()
+		sfx(ok and 2.6 or 1.1)
 		if ok then
 			setState("ok", "ok")
 			if res ~= nil then log("retorno: " .. tostring(res), "ok") end
@@ -974,12 +1370,14 @@ local function applyTheme(th)
 	end
 	shimmerGrad.Color = ColorSequence.new(T.accent, T.accent)
 	themeBtn.Text = T.name:sub(1, 5)
+	buildTabs()
+	updateSfxBtn()
 	render()
 	layout()
 	setState(stateLabel, stateKind)
 end
 
-local function zoom(delta)
+local function zoom(delta, silent)
 	local n = math.clamp(SIZE + delta, 10, 16)
 	if n == SIZE then return end
 	SIZE = n
@@ -988,6 +1386,7 @@ local function zoom(delta)
 	scroll.ScrollBarThickness = 3
 	layout()
 	render()
+	if not silent then saveSoon() end
 end
 
 -- acoes -----------------------------------------------------------------------
@@ -1006,6 +1405,7 @@ clearBtn.MouseButton1Click:Connect(function()
 	setState("pronto", "dim")
 	layout()
 	render()
+	saveSoon()
 end)
 
 lineBtn.MouseButton1Click:Connect(function()
@@ -1029,15 +1429,38 @@ end)
 smallBtn.MouseButton1Click:Connect(function() zoom(-1) end)
 bigBtn.MouseButton1Click:Connect(function() zoom(1) end)
 
-local themeIndex = 1
+addBtn.MouseButton1Click:Connect(function()
+	newTab()
+end)
+
+sfxBtn.MouseButton1Click:Connect(function()
+	soundOn = not soundOn
+	updateSfxBtn()
+	sfx(2.4)
+	saveSoon()
+end)
+
 themeBtn.MouseButton1Click:Connect(function()
 	themeIndex = themeIndex % #THEMES + 1
 	applyTheme(THEMES[themeIndex])
+	saveSoon()
+end)
+
+veil.MouseButton1Click:Connect(function()
+	sfx(1.4)
+	closeDlg()
+end)
+cancelBtn.MouseButton1Click:Connect(closeDlg)
+okBtn.MouseButton1Click:Connect(applyRename)
+nameBox.FocusLost:Connect(function(enter)
+	if enter and dlg.Visible then applyRename() end
 end)
 
 ed:GetPropertyChangedSignal("Text"):Connect(function()
+	commit()
 	layout()
 	if ed:IsFocused() then follow() end
+	saveSoon()
 end)
 
 pcall(function()
@@ -1066,6 +1489,7 @@ ed.FocusLost:Connect(function(enter)
 end)
 
 hit.Activated:Connect(function()
+	sfx(2.0)
 	ed:CaptureFocus()
 end)
 
@@ -1190,14 +1614,16 @@ local function minimize()
 	minimized = not minimized
 	if minimized then
 		miniSize, miniPos = win.Size, win.Position
-		tabs.Visible = false
+		dlg.Visible = false
+		pcall(function() nameBox:ReleaseFocus() end)
+		tabBar.Visible = false
 		tool.Visible = false
 		well.Visible = false
 		status.Visible = false
 		win.ClipsDescendants = true
 		tween(win, { Size = UDim2.fromOffset(win.AbsoluteSize.X, TITLE_H) }, 0.15, Enum.EasingStyle.Quint)
 	else
-		tabs.Visible = true
+		tabBar.Visible = true
 		tool.Visible = true
 		well.Visible = true
 		status.Visible = true
@@ -1216,8 +1642,11 @@ local closed = false
 local function close()
 	if closed then return end
 	closed = true
+	commit()
+	saveNow()
 	for i = #conns, 1, -1 do pcall(function() conns[i]:Disconnect() end) end
 	pcall(function() getgenv().TerminalLuau = nil end)
+	pcall(function() snd:Destroy() end)
 	local sc = win:FindFirstChildOfClass("UIScale")
 	if sc then tween(sc, { Scale = 0.97 }, 0.09) end
 	task.delay(0.1, function() sg:Destroy() end)
@@ -1260,20 +1689,27 @@ on(UIS.InputBegan, function(i, gp)
 end)
 
 -- teclado do celular ----------------------------------------------------------
-if isTouch then
-	local raised, home = false, win.Position
-	ed.Focused:Connect(function()
-		if raised then return end
-		raised = true
-		home = win.Position
-		tween(win, { Position = UDim2.fromOffset(home.X.Offset, 10) }, 0.16).Completed:Connect(syncShadow)
-	end)
-	ed.FocusLost:Connect(function()
-		if not raised then return end
-		raised = false
-		tween(win, { Position = home }, 0.16).Completed:Connect(syncShadow)
-	end)
+local kbRaised, kbHome = false, win.Position
+
+local function raiseKB()
+	if not isTouch or kbRaised then return end
+	kbRaised = true
+	kbHome = win.Position
+	tween(win, { Position = UDim2.fromOffset(kbHome.X.Offset, 10) }, 0.16).Completed:Connect(syncShadow)
 end
+
+local function lowerKB()
+	if not kbRaised then return end
+	kbRaised = false
+	tween(win, { Position = kbHome }, 0.16).Completed:Connect(syncShadow)
+end
+
+ed.Focused:Connect(raiseKB)
+ed.FocusLost:Connect(lowerKB)
+nameBox.Focused:Connect(raiseKB)
+nameBox.FocusLost:Connect(function()
+	if not dlg.Visible then lowerKB() end
+end)
 
 pcall(function()
 	getgenv().TerminalLuau = { close = close }
@@ -1285,6 +1721,16 @@ openScale.Scale = 0.97
 openScale.Parent = win
 tween(openScale, { Scale = 1 }, 0.14, Enum.EasingStyle.Quint)
 
+local restored = loadStore()
+if restored then
+	applyTheme(THEMES[themeIndex])
+	if pendingSize then
+		zoom(pendingSize - SIZE, true)
+	end
+	ed.Text = tabState.list[tabState.active].code
+end
+buildTabs()
+updateSfxBtn()
 LH = math.max(SIZE + 2, math.floor(TextService:GetTextSize("A\nA", SIZE, FONT, Vector2.new(4000, 4000)).Y / 2 + 0.5))
 ed.TextTransparency = 1
 view.ZIndex = 11
